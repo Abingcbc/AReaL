@@ -8,6 +8,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, cast
 
+import torch
 import torch.distributed as dist
 from torchdata.stateful_dataloader import StatefulDataLoader
 
@@ -678,18 +679,38 @@ class PPOTrainer:
                     ),
                 ):
                     teacher_logps = self.teacher.compute_logp(rollout_batch)
+                    opd = self.config.teacher.opd
+                    opd_mode = opd.mode if opd.enabled else "joint_loss"
                     for traj, logp in zip(rollout_batch, teacher_logps):
+                        if self.config.teacher.engine_type == "rollout":
+                            # Remote scorers return response-token-aligned values,
+                            # while train engines and actor losses use prediction
+                            # positions for next-token log-probabilities.
+                            logp = torch.roll(logp, shifts=-1, dims=-1)
+                            logp[..., -1] = 0
                         traj["teacher_logp"] = logp
                         traj["rl_loss_weight"] = self.config.teacher.rl_loss_weight
                         traj["distill_loss_weight"] = (
                             self.config.teacher.distill_loss_weight
                         )
+                        traj["opd_mode"] = opd_mode
+                        traj["opd_kl_coef"] = opd.kl_coef
+                        traj["opd_student_logp_source"] = opd.student_logp_source
                 if self._should_offload_teacher:
                     self._offload_model(self.teacher, role="teacher")
 
             if self._should_offload_actor:
                 self._onload_model(self.actor, role="actor")
-            if config.actor.should_compute_prox_logp():
+            use_opd_kl_penalty = (
+                config.teacher is not None
+                and config.teacher.opd.enabled
+                and config.teacher.opd.mode == "kl_penalty"
+            )
+            recompute_opd_student_logp = (
+                use_opd_kl_penalty
+                and config.teacher.opd.student_logp_source == "recompute"
+            )
+            if config.actor.should_compute_prox_logp() or recompute_opd_student_logp:
                 with (
                     stats_tracker.record_timing("recompute_logp"),
                     perf_tracer.trace_scope(
@@ -701,6 +722,8 @@ class PPOTrainer:
                     prox_logps = self.actor.compute_logp(rollout_batch)
                     for traj, logp in zip(rollout_batch, prox_logps):
                         traj["prox_logp"] = logp
+                        if recompute_opd_student_logp:
+                            traj["opd_student_logp"] = logp
                     self.actor.get_device_stats().log("recompute logp")
 
             with (

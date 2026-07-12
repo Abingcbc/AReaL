@@ -29,6 +29,7 @@ from areal.utils.data import (
     split_padded_tensor_dict_into_mb_list,
 )
 from areal.utils.functional import (
+    apply_opd_advantage_penalty,
     cispo_loss_fn,
     ppo_actor_loss_fn,
     reward_overlong_penalty,
@@ -183,6 +184,7 @@ class PPOActor:
 
         loss_mask = data["loss_mask"].float()
         loss_mask = torch.roll(loss_mask, shifts=-1, dims=-1)
+        rollout_student_logp = torch.roll(data["logprobs"], shifts=-1, dims=-1)
         # Apply the mask to log probabilities.
         if not self.config.use_decoupled_loss and self.config.recompute_logprob:
             # Overwrite logprobs produced by the inference engine
@@ -194,7 +196,7 @@ class PPOActor:
                 )
             old_logp = data["logprobs"] = prox_logp_value
         else:
-            old_logp = torch.roll(data["logprobs"], shifts=-1, dims=-1)
+            old_logp = rollout_student_logp
             if not self.config.use_decoupled_loss:
                 # prox logp not available, use inferenced logp
                 data["prox_logp"] = old_logp
@@ -242,6 +244,36 @@ class PPOActor:
 
         advantages = torch.stack(advantages_reversed[::-1], dim=1)
         data["returns"] = advantages + values
+
+        if data.get("opd_mode") == "kl_penalty":
+            student_logp_source = data.get("opd_student_logp_source", "recompute")
+            if student_logp_source == "recompute":
+                student_logprobs = data.get("opd_student_logp")
+            elif student_logp_source == "rollout":
+                student_logprobs = rollout_student_logp
+            else:
+                raise ValueError(
+                    "Unsupported OPD student log-probability source: "
+                    f"{student_logp_source!r}."
+                )
+            teacher_logprobs = data.get("teacher_logp")
+            if student_logprobs is None:
+                raise ValueError(
+                    "OPD KL penalty with student_logp_source='recompute' "
+                    "requires actor-scored opd_student_logp, but it is missing."
+                )
+            if teacher_logprobs is None:
+                raise ValueError(
+                    "OPD KL penalty requires teacher_logp, but it is missing."
+                )
+            advantages, reverse_kl = apply_opd_advantage_penalty(
+                advantages=advantages,
+                student_logprobs=student_logprobs,
+                teacher_logprobs=teacher_logprobs,
+                loss_mask=loss_mask,
+                kl_coef=data.get("opd_kl_coef", 1.0),
+            )
+            data["opd_reverse_kl"] = reverse_kl
 
         # Optionally perform advantage normalization.
         if self.adv_norm is not None:
@@ -305,6 +337,8 @@ class PPOActor:
             kl_rewards=data["kl_rewards"],
             final_reward=data["tot_rewards"],
         )
+        if "opd_reverse_kl" in data:
+            stats["opd_reverse_kl"] = data["opd_reverse_kl"]
         stats_tracker.stat(**stats, denominator="n_valid_tokens")
 
         prompt_lens = data["attention_mask"].sum(-1) - data["loss_mask"].sum(-1)
@@ -519,10 +553,13 @@ def grpo_loss_fn(
             cu_seqlens=input_data.get("cu_seqlens"),
         )
 
-    # Joint Distillation KL Loss
+    # Teacher supervision: either advantage OPD or joint distillation, never both.
+    opd_mode = input_data.get("opd_mode", "joint_loss")
     teacher_logp = input_data.get("teacher_logp")
     rkl_stat = None
-    if teacher_logp is not None:
+    if opd_mode == "kl_penalty":
+        loss = input_data.get("rl_loss_weight", 1.0) * loss
+    elif opd_mode == "joint_loss" and teacher_logp is not None:
         # Coefficients for RL and Knowledge Distillation
         rl_loss_weight = input_data.get("rl_loss_weight", 1.0)
         distill_loss_weight = input_data.get("distill_loss_weight", 0.005)
@@ -550,6 +587,8 @@ def grpo_loss_fn(
             loss = rl_loss_weight * loss + distill_loss_weight * rkl_penalty
 
             rkl_stat = rkl_penalty_per_token
+    elif opd_mode != "joint_loss":
+        raise ValueError(f"Unsupported OPD mode: {opd_mode!r}.")
 
     # Log training statistics
     stats_tracker.denominator(

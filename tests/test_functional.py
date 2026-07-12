@@ -3,9 +3,49 @@ import torch
 
 from areal.api.cli_args import RejectionSamplingConfig
 from areal.utils.functional import (
+    apply_opd_advantage_penalty,
     ppo_actor_loss_fn,
     sapo_loss_fn,
 )
+
+
+def test_apply_opd_advantage_penalty_masks_and_detaches_logprobs():
+    """OPD should adjust valid tokens without retaining log-prob gradients."""
+    advantages = torch.tensor([[1.0, 2.0, 3.0]])
+    student = torch.tensor([[0.5, 0.2, -0.1]], requires_grad=True)
+    teacher = torch.tensor([[0.1, 0.4, -0.3]], requires_grad=True)
+    loss_mask = torch.tensor([[True, False, True]])
+
+    adjusted, reverse_kl = apply_opd_advantage_penalty(
+        advantages, student, teacher, loss_mask, kl_coef=2.0
+    )
+
+    torch.testing.assert_close(
+        reverse_kl,
+        torch.tensor([[0.4, 0.0, 0.2]]),
+        rtol=0.0,
+        atol=1e-6,
+    )
+    torch.testing.assert_close(
+        adjusted,
+        torch.tensor([[0.2, 2.0, 2.6]]),
+        rtol=0.0,
+        atol=1e-6,
+    )
+    assert not adjusted.requires_grad
+    assert not reverse_kl.requires_grad
+
+
+def test_apply_opd_advantage_penalty_rejects_shape_mismatch():
+    """OPD should fail early when token-aligned tensors have different shapes."""
+    with pytest.raises(ValueError, match="student_logprobs shape"):
+        apply_opd_advantage_penalty(
+            advantages=torch.zeros(1, 3),
+            student_logprobs=torch.zeros(1, 2),
+            teacher_logprobs=torch.zeros(1, 3),
+            loss_mask=torch.ones(1, 3, dtype=torch.bool),
+            kl_coef=1.0,
+        )
 
 
 class TestPPOActorLossFnSequenceLevel:

@@ -8,7 +8,7 @@ from dataclasses import MISSING as dataclass_missing
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar
 
 import uvloop
 import yaml
@@ -3073,6 +3073,51 @@ class DPOConfig(BaseExperimentConfig):
 
 
 @dataclass
+class TeacherOPDConfig:
+    """On-policy distillation behavior for a configured teacher."""
+
+    enabled: bool = field(
+        default=False,
+        metadata={"help": "Whether to enable explicit OPD mode selection."},
+    )
+    mode: Literal["joint_loss", "kl_penalty"] = field(
+        default="joint_loss",
+        metadata={
+            "help": "Apply teacher supervision as a joint loss or OPD KL penalty.",
+            "choices": ["joint_loss", "kl_penalty"],
+        },
+    )
+    kl_coef: float = field(
+        default=1.0,
+        metadata={"help": "Sampled reverse-KL coefficient for OPD KL penalty."},
+    )
+    student_logp_source: Literal["recompute", "rollout"] = field(
+        default="recompute",
+        metadata={
+            "help": "Student log-probability source for OPD KL penalty.",
+            "choices": ["recompute", "rollout"],
+        },
+    )
+
+    def __post_init__(self):
+        if self.kl_coef < 0:
+            raise ValueError(
+                "teacher.opd.kl_coef must be non-negative, "
+                f"got {self.kl_coef}."
+            )
+        if not self.enabled and self.mode != "joint_loss":
+            raise ValueError(
+                "teacher.opd.mode='kl_penalty' requires "
+                "teacher.opd.enabled=true."
+            )
+        if self.student_logp_source not in ("recompute", "rollout"):
+            raise ValueError(
+                "teacher.opd.student_logp_source must be 'recompute' or "
+                f"'rollout', got {self.student_logp_source!r}."
+            )
+
+
+@dataclass
 class TeacherConfig:
     engine_type: str = field(
         default="rollout",
@@ -3108,6 +3153,7 @@ class TeacherConfig:
         default=0.005,
         metadata={"help": "Distillation loss weight"},
     )
+    opd: TeacherOPDConfig = field(default_factory=TeacherOPDConfig)
 
     def __post_init__(self):
         if self.rollout is not None and self.train is not None:
@@ -3124,6 +3170,12 @@ class TeacherConfig:
             raise ValueError(
                 "teacher.train must be provided when teacher.engine_type='train'."
             )
+        if self.opd.enabled and self.opd.mode == "kl_penalty":
+            if self.rl_loss_weight <= 0:
+                raise ValueError(
+                    "teacher.rl_loss_weight must be positive when "
+                    "teacher.opd.mode='kl_penalty'."
+                )
 
 
 @dataclass
