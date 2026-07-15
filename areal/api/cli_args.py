@@ -3102,13 +3102,11 @@ class TeacherOPDConfig:
     def __post_init__(self):
         if self.kl_coef < 0:
             raise ValueError(
-                "teacher.opd.kl_coef must be non-negative, "
-                f"got {self.kl_coef}."
+                f"teacher.opd.kl_coef must be non-negative, got {self.kl_coef}."
             )
         if not self.enabled and self.mode != "joint_loss":
             raise ValueError(
-                "teacher.opd.mode='kl_penalty' requires "
-                "teacher.opd.enabled=true."
+                "teacher.opd.mode='kl_penalty' requires teacher.opd.enabled=true."
             )
         if self.student_logp_source not in ("recompute", "rollout"):
             raise ValueError(
@@ -3146,7 +3144,10 @@ class TeacherConfig:
     )
     rl_loss_weight: float = field(
         default=1.0,
-        metadata={"help": "RL loss weight"},
+        metadata={
+            "help": "RL loss weight. In KL penalty mode, scales the base RL "
+            "advantage; 0 enables pure OPD."
+        },
     )
 
     distill_loss_weight: float = field(
@@ -3171,9 +3172,9 @@ class TeacherConfig:
                 "teacher.train must be provided when teacher.engine_type='train'."
             )
         if self.opd.enabled and self.opd.mode == "kl_penalty":
-            if self.rl_loss_weight <= 0:
+            if self.rl_loss_weight < 0:
                 raise ValueError(
-                    "teacher.rl_loss_weight must be positive when "
+                    "teacher.rl_loss_weight must be non-negative when "
                     "teacher.opd.mode='kl_penalty'."
                 )
 

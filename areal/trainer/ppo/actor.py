@@ -246,6 +246,7 @@ class PPOActor:
         data["returns"] = advantages + values
 
         if data.get("opd_mode") == "kl_penalty":
+            advantages = advantages.float() * data.get("rl_loss_weight", 1.0)
             student_logp_source = data.get("opd_student_logp_source", "recompute")
             if student_logp_source == "recompute":
                 student_logprobs = data.get("opd_student_logp")
@@ -557,9 +558,7 @@ def grpo_loss_fn(
     opd_mode = input_data.get("opd_mode", "joint_loss")
     teacher_logp = input_data.get("teacher_logp")
     rkl_stat = None
-    if opd_mode == "kl_penalty":
-        loss = input_data.get("rl_loss_weight", 1.0) * loss
-    elif opd_mode == "joint_loss" and teacher_logp is not None:
+    if opd_mode == "joint_loss" and teacher_logp is not None:
         # Coefficients for RL and Knowledge Distillation
         rl_loss_weight = input_data.get("rl_loss_weight", 1.0)
         distill_loss_weight = input_data.get("distill_loss_weight", 0.005)
@@ -587,7 +586,7 @@ def grpo_loss_fn(
             loss = rl_loss_weight * loss + distill_loss_weight * rkl_penalty
 
             rkl_stat = rkl_penalty_per_token
-    elif opd_mode != "joint_loss":
+    elif opd_mode not in ("joint_loss", "kl_penalty"):
         raise ValueError(f"Unsupported OPD mode: {opd_mode!r}.")
 
     # Log training statistics

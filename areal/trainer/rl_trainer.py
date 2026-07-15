@@ -76,6 +76,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger("RLTrainer")
 
 
+def _store_actor_logps(
+    rollout_batch: list[dict[str, Any]],
+    actor_logps: list[torch.Tensor],
+    *,
+    store_prox_logp: bool,
+    store_opd_student_logp: bool,
+) -> None:
+    """Store actor scores only under the semantics that requested them."""
+    for traj, logp in zip(rollout_batch, actor_logps):
+        if store_prox_logp:
+            traj["prox_logp"] = logp
+        if store_opd_student_logp:
+            traj["opd_student_logp"] = logp
+
+
 class _EmptyDataLoader:
     """Minimal dataloader for online mode that yields empty dicts.
 
@@ -710,7 +725,8 @@ class PPOTrainer:
                 use_opd_kl_penalty
                 and config.teacher.opd.student_logp_source == "recompute"
             )
-            if config.actor.should_compute_prox_logp() or recompute_opd_student_logp:
+            compute_prox_logp = config.actor.should_compute_prox_logp()
+            if compute_prox_logp or recompute_opd_student_logp:
                 with (
                     stats_tracker.record_timing("recompute_logp"),
                     perf_tracer.trace_scope(
@@ -720,10 +736,12 @@ class PPOTrainer:
                     ),
                 ):
                     prox_logps = self.actor.compute_logp(rollout_batch)
-                    for traj, logp in zip(rollout_batch, prox_logps):
-                        traj["prox_logp"] = logp
-                        if recompute_opd_student_logp:
-                            traj["opd_student_logp"] = logp
+                    _store_actor_logps(
+                        rollout_batch,
+                        prox_logps,
+                        store_prox_logp=compute_prox_logp,
+                        store_opd_student_logp=recompute_opd_student_logp,
+                    )
                     self.actor.get_device_stats().log("recompute logp")
 
             with (

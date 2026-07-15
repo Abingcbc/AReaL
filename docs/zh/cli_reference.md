@@ -85,6 +85,7 @@ python3 train.py --config path/to/config.yaml actor.lr=1e-4 seed=42
 - [SchedulingStrategy](section-scheduling-strategy)
 - [SessionTracer Configuration](section-session-tracer)
 - [Teacher Configuration](section-teacher)
+- [TeacherOPD Configuration](section-teacher-opd)
 
 ______________________________________________________________________
 
@@ -1255,12 +1256,26 @@ Configuration for per-session lifecycle tracing.
 
 Configuration class: TeacherConfig
 
-| Parameter             | Type                                                        | Default     | Description                                                                                                                                      |
-| --------------------- | ----------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `engine_type`         | string                                                      | `"rollout"` | Teacher engine type. 'rollout' uses inference engine scoring; 'train' uses the legacy train-engine teacher path. **Choices:** `rollout`, `train` |
-| `rollout`             | [`InferenceEngineConfig`](section-inference-engine) \| None | `None`      | -                                                                                                                                                |
-| `train`               | [`PPOActorConfig`](section-ppo-actor) \| None               | `None`      | Legacy train-engine teacher config. Required when engine_type='train'.                                                                           |
-| `path`                | string                                                      | `""`        | Teacher model path. If set, overrides shared rollout backend model path.                                                                         |
-| `offload`             | boolean                                                     | `False`     | Whether to offload teacher rollout model between steps                                                                                           |
-| `rl_loss_weight`      | float                                                       | `1.0`       | RL loss weight                                                                                                                                   |
-| `distill_loss_weight` | float                                                       | `0.005`     | Distillation loss weight                                                                                                                         |
+| Parameter             | Type                                                        | Default      | Description                                                                                                                                      |
+| --------------------- | ----------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `engine_type`         | string                                                      | `"rollout"`  | Teacher engine type. 'rollout' uses inference engine scoring; 'train' uses the legacy train-engine teacher path. **Choices:** `rollout`, `train` |
+| `rollout`             | [`InferenceEngineConfig`](section-inference-engine) \| None | `None`       | -                                                                                                                                                |
+| `train`               | [`PPOActorConfig`](section-ppo-actor) \| None               | `None`       | Legacy train-engine teacher config. Required when engine_type='train'.                                                                           |
+| `path`                | string                                                      | `""`         | Teacher model path. If set, overrides shared rollout backend model path.                                                                         |
+| `offload`             | boolean                                                     | `False`      | Whether to offload teacher rollout model between steps                                                                                           |
+| `rl_loss_weight`      | float                                                       | `1.0`        | RL loss weight. In KL penalty mode, scales the base RL advantage; 0 enables pure OPD.                                                            |
+| `distill_loss_weight` | float                                                       | `0.005`      | Distillation loss weight                                                                                                                         |
+| `opd`                 | [`TeacherOPDConfig`](section-teacher-opd)                   | **Required** | -                                                                                                                                                |
+
+(section-teacher-opd)=
+
+## TeacherOPD Configuration
+
+On-policy distillation behavior for a configured teacher.
+
+| Parameter             | Type      | Default        | Description                                                                                          |
+| --------------------- | --------- | -------------- | ---------------------------------------------------------------------------------------------------- |
+| `enabled`             | boolean   | `False`        | Whether to enable explicit OPD mode selection.                                                       |
+| `mode`                | `Literal` | `"joint_loss"` | Apply teacher supervision as a joint loss or OPD KL penalty. **Choices:** `joint_loss`, `kl_penalty` |
+| `kl_coef`             | float     | `1.0`          | Sampled reverse-KL coefficient for OPD KL penalty.                                                   |
+| `student_logp_source` | `Literal` | `"recompute"`  | Student log-probability source for OPD KL penalty. **Choices:** `recompute`, `rollout`               |
