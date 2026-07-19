@@ -11,7 +11,9 @@ from areal.api.cli_args import (
     TeacherConfig,
     to_structured_cfg,
 )
+from areal.infra.rpc.rtensor import RTensor, TensorShardInfo
 from areal.trainer.ppo.actor import PPOActor, grpo_loss_fn
+from areal.trainer.rl_trainer import _align_rollout_teacher_logps
 
 
 def _teacher_config(**kwargs) -> TeacherConfig:
@@ -185,6 +187,21 @@ def test_store_actor_logps_keeps_opd_score_out_of_loglinear_proximal_policy():
 
     assert "prox_logp" not in trajectories[0]
     assert trajectories[0]["opd_student_logp"] is scored_logp
+
+
+def test_rollout_teacher_logps_localize_rtensors_before_alignment():
+    """Remote teacher scores must be materialized before tensor operations."""
+    score = RTensor(
+        shard=TensorShardInfo(shard_id="teacher-score", node_addr="teacher:1234"),
+        data=torch.tensor([[0.1, 0.2, 0.3]]),
+    )
+
+    aligned, score_refs = _align_rollout_teacher_logps([score])
+
+    assert score_refs[0] is score
+    torch.testing.assert_close(
+        aligned[0], torch.tensor([[0.2, 0.3, 0.0]]), rtol=0.0, atol=0.0
+    )
 
 
 def test_kl_penalty_loss_does_not_rescale_adjusted_advantages():
