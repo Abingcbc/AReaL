@@ -3073,49 +3073,6 @@ class DPOConfig(BaseExperimentConfig):
 
 
 @dataclass
-class TeacherOPDConfig:
-    """On-policy distillation behavior for a configured teacher."""
-
-    enabled: bool = field(
-        default=False,
-        metadata={"help": "Whether to enable explicit OPD mode selection."},
-    )
-    mode: Literal["joint_loss", "kl_penalty"] = field(
-        default="joint_loss",
-        metadata={
-            "help": "Apply teacher supervision as a joint loss or OPD KL penalty.",
-            "choices": ["joint_loss", "kl_penalty"],
-        },
-    )
-    kl_coef: float = field(
-        default=1.0,
-        metadata={"help": "Sampled reverse-KL coefficient for OPD KL penalty."},
-    )
-    student_logp_source: Literal["recompute", "rollout"] = field(
-        default="recompute",
-        metadata={
-            "help": "Student log-probability source for OPD KL penalty.",
-            "choices": ["recompute", "rollout"],
-        },
-    )
-
-    def __post_init__(self):
-        if self.kl_coef < 0:
-            raise ValueError(
-                f"teacher.opd.kl_coef must be non-negative, got {self.kl_coef}."
-            )
-        if not self.enabled and self.mode != "joint_loss":
-            raise ValueError(
-                "teacher.opd.mode='kl_penalty' requires teacher.opd.enabled=true."
-            )
-        if self.student_logp_source not in ("recompute", "rollout"):
-            raise ValueError(
-                "teacher.opd.student_logp_source must be 'recompute' or "
-                f"'rollout', got {self.student_logp_source!r}."
-            )
-
-
-@dataclass
 class TeacherConfig:
     engine_type: str = field(
         default="rollout",
@@ -3146,7 +3103,7 @@ class TeacherConfig:
         default=1.0,
         metadata={
             "help": "RL loss weight. In KL penalty mode, scales the base RL "
-            "advantage; 0 enables pure OPD."
+            "advantage."
         },
     )
 
@@ -3154,7 +3111,24 @@ class TeacherConfig:
         default=0.005,
         metadata={"help": "Distillation loss weight"},
     )
-    opd: TeacherOPDConfig = field(default_factory=TeacherOPDConfig)
+    distillation_mode: Literal["joint_loss", "kl_penalty"] = field(
+        default="joint_loss",
+        metadata={
+            "help": "Apply teacher supervision as a joint loss or OPD KL penalty.",
+            "choices": ["joint_loss", "kl_penalty"],
+        },
+    )
+    opd_kl_coef: float = field(
+        default=1.0,
+        metadata={"help": "Sampled reverse-KL coefficient for OPD KL penalty."},
+    )
+    opd_student_logp_source: Literal["recompute", "rollout"] = field(
+        default="recompute",
+        metadata={
+            "help": "Student log-probability source for OPD KL penalty.",
+            "choices": ["recompute", "rollout"],
+        },
+    )
 
     def __post_init__(self):
         if self.rollout is not None and self.train is not None:
@@ -3171,12 +3145,25 @@ class TeacherConfig:
             raise ValueError(
                 "teacher.train must be provided when teacher.engine_type='train'."
             )
-        if self.opd.enabled and self.opd.mode == "kl_penalty":
-            if self.rl_loss_weight < 0:
-                raise ValueError(
-                    "teacher.rl_loss_weight must be non-negative when "
-                    "teacher.opd.mode='kl_penalty'."
-                )
+        if self.distillation_mode not in ("joint_loss", "kl_penalty"):
+            raise ValueError(
+                "teacher.distillation_mode must be 'joint_loss' or 'kl_penalty', "
+                f"got {self.distillation_mode!r}."
+            )
+        if self.opd_kl_coef < 0:
+            raise ValueError(
+                f"teacher.opd_kl_coef must be non-negative, got {self.opd_kl_coef}."
+            )
+        if self.opd_student_logp_source not in ("recompute", "rollout"):
+            raise ValueError(
+                "teacher.opd_student_logp_source must be 'recompute' or "
+                f"'rollout', got {self.opd_student_logp_source!r}."
+            )
+        if self.distillation_mode == "kl_penalty" and self.rl_loss_weight < 0:
+            raise ValueError(
+                "teacher.rl_loss_weight must be non-negative when "
+                "teacher.distillation_mode='kl_penalty'."
+            )
 
 
 @dataclass

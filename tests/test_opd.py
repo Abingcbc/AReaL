@@ -7,7 +7,6 @@ from areal.api.cli_args import (
     InferenceEngineConfig,
     PPOActorConfig,
     TeacherConfig,
-    TeacherOPDConfig,
 )
 from areal.trainer.ppo.actor import PPOActor, grpo_loss_fn
 
@@ -20,39 +19,36 @@ def test_teacher_opd_defaults_preserve_joint_loss():
     """Legacy teacher configurations should continue to select joint loss."""
     config = _teacher_config()
 
-    assert config.opd.enabled is False
-    assert config.opd.mode == "joint_loss"
-    assert config.opd.kl_coef == 1.0
-    assert config.opd.student_logp_source == "recompute"
+    assert config.distillation_mode == "joint_loss"
+    assert config.opd_kl_coef == 1.0
+    assert config.opd_student_logp_source == "recompute"
 
 
 @pytest.mark.parametrize("source", ["recompute", "rollout"])
 def test_teacher_opd_accepts_student_logp_sources(source):
     """OPD should accept both slime-compatible student logp sources."""
-    config = TeacherOPDConfig(student_logp_source=source)
+    config = _teacher_config(opd_student_logp_source=source)
 
-    assert config.student_logp_source == source
+    assert config.opd_student_logp_source == source
 
 
 def test_teacher_opd_rejects_unknown_student_logp_source():
     """OPD should reject unknown student logp sources during config parsing."""
-    with pytest.raises(ValueError, match="student_logp_source must be"):
-        TeacherOPDConfig(student_logp_source="unknown")
+    with pytest.raises(ValueError, match="opd_student_logp_source must be"):
+        _teacher_config(opd_student_logp_source="unknown")
 
 
 def test_teacher_opd_kl_penalty_allows_zero_rl_weight():
     """Advantage OPD should support pure distillation without task advantages."""
-    opd = TeacherOPDConfig(enabled=True, mode="kl_penalty")
-
-    config = _teacher_config(opd=opd, rl_loss_weight=0.0)
+    config = _teacher_config(distillation_mode="kl_penalty", rl_loss_weight=0.0)
 
     assert config.rl_loss_weight == 0.0
 
 
-def test_teacher_opd_disabled_rejects_advantage_mode():
-    """Selecting advantage OPD should require its explicit enable flag."""
-    with pytest.raises(ValueError, match="requires teacher.opd.enabled=true"):
-        TeacherOPDConfig(enabled=False, mode="kl_penalty")
+def test_teacher_rejects_unknown_distillation_mode():
+    """Teacher config should reject unsupported distillation modes early."""
+    with pytest.raises(ValueError, match="distillation_mode must be"):
+        _teacher_config(distillation_mode="unknown")
 
 
 def test_actor_applies_opd_before_advantage_normalization_and_keeps_returns():

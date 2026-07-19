@@ -694,8 +694,7 @@ class PPOTrainer:
                     ),
                 ):
                     teacher_logps = self.teacher.compute_logp(rollout_batch)
-                    opd = self.config.teacher.opd
-                    opd_mode = opd.mode if opd.enabled else "joint_loss"
+                    distillation_mode = self.config.teacher.distillation_mode
                     for traj, logp in zip(rollout_batch, teacher_logps):
                         if self.config.teacher.engine_type == "rollout":
                             # Remote scorers return response-token-aligned values,
@@ -708,9 +707,11 @@ class PPOTrainer:
                         traj["distill_loss_weight"] = (
                             self.config.teacher.distill_loss_weight
                         )
-                        traj["opd_mode"] = opd_mode
-                        traj["opd_kl_coef"] = opd.kl_coef
-                        traj["opd_student_logp_source"] = opd.student_logp_source
+                        traj["opd_mode"] = distillation_mode
+                        traj["opd_kl_coef"] = self.config.teacher.opd_kl_coef
+                        traj["opd_student_logp_source"] = (
+                            self.config.teacher.opd_student_logp_source
+                        )
                 if self._should_offload_teacher:
                     self._offload_model(self.teacher, role="teacher")
 
@@ -718,12 +719,11 @@ class PPOTrainer:
                 self._onload_model(self.actor, role="actor")
             use_opd_kl_penalty = (
                 config.teacher is not None
-                and config.teacher.opd.enabled
-                and config.teacher.opd.mode == "kl_penalty"
+                and config.teacher.distillation_mode == "kl_penalty"
             )
             recompute_opd_student_logp = (
                 use_opd_kl_penalty
-                and config.teacher.opd.student_logp_source == "recompute"
+                and config.teacher.opd_student_logp_source == "recompute"
             )
             compute_prox_logp = config.actor.should_compute_prox_logp()
             if compute_prox_logp or recompute_opd_student_logp:
