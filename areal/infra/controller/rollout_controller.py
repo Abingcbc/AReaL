@@ -990,7 +990,12 @@ class RolloutController:
         trajectories = [r.trajectory if r is not None else None for r in results]
         return [t for t in trajectories if t is not None]
 
-    def compute_logp(self, data: list[dict[str, Any]]) -> list[Any]:
+    def compute_logp(
+        self,
+        data: list[dict[str, Any]],
+        *,
+        align_to_prediction: bool = False,
+    ) -> list[Any]:
         """Compute token log-probabilities for trajectories via remote workers."""
         if len(data) == 0:
             return []
@@ -1014,6 +1019,7 @@ class RolloutController:
                         method="compute_logp",
                         engine_name=self._engine_name(rank),
                         data=chunk,
+                        align_to_prediction=align_to_prediction,
                         http_timeout=self.config.request_timeout,
                     )
                 )

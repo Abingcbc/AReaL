@@ -46,7 +46,6 @@ from areal.infra import (
 from areal.infra.data_service import DataController
 from areal.infra.data_service.controller.config import DataServiceConfig
 from areal.infra.data_service.rdataset import RDataset
-from areal.infra.rpc.rtensor import RTensor
 from areal.infra.utils.concurrent import call_maybe_async
 from areal.utils import logging, perf_tracer, seeding, stats_tracker
 from areal.utils.dataloader import create_dataloader
@@ -90,28 +89,6 @@ def _store_actor_logps(
             traj["prox_logp"] = logp
         if store_opd_student_logp:
             traj["opd_student_logp"] = logp
-
-
-def _align_rollout_teacher_logps(
-    logps: list[torch.Tensor | RTensor],
-) -> tuple[list[torch.Tensor], list[RTensor]]:
-    """Materialize and align remote teacher scores while retaining their shards."""
-    score_refs = [logp for logp in logps if isinstance(logp, RTensor)]
-    local_logps = RTensor.localize(logps) if score_refs else logps
-    aligned_logps: list[torch.Tensor] = []
-    for logp in local_logps:
-        if not isinstance(logp, torch.Tensor):
-            raise TypeError(
-                "Rollout teacher compute_logp must return Tensors or RTensors, "
-                f"got {type(logp).__name__}"
-            )
-
-        # Remote scorers return response-token-aligned values, while actor losses
-        # use prediction positions for next-token log-probabilities.
-        logp = torch.roll(logp, shifts=-1, dims=-1)
-        logp[..., -1] = 0
-        aligned_logps.append(logp)
-    return aligned_logps, score_refs
 
 
 class _EmptyDataLoader:
@@ -705,7 +682,6 @@ class PPOTrainer:
                 if self._should_offload_ref:
                     self._offload_model(self.ref, role="ref")
 
-            teacher_logp_refs: list[RTensor] = []
             if self.teacher is not None:
                 if self._should_offload_teacher:
                     self._onload_model(self.teacher, role="teacher")
@@ -717,12 +693,13 @@ class PPOTrainer:
                         args={"global_step": global_step},
                     ),
                 ):
-                    teacher_logps = self.teacher.compute_logp(rollout_batch)
-                    distillation_mode = self.config.teacher.distillation_mode
                     if self.config.teacher.engine_type == "rollout":
-                        teacher_logps, teacher_logp_refs = _align_rollout_teacher_logps(
-                            teacher_logps
+                        teacher_logps = self.teacher.compute_logp(
+                            rollout_batch, align_to_prediction=True
                         )
+                    else:
+                        teacher_logps = self.teacher.compute_logp(rollout_batch)
+                    distillation_mode = self.config.teacher.distillation_mode
                     for traj, logp in zip(rollout_batch, teacher_logps):
                         traj["teacher_logp"] = logp
                         traj["rl_loss_weight"] = self.config.teacher.rl_loss_weight
@@ -913,11 +890,7 @@ class PPOTrainer:
                 # SPMD mode never populates ``_fetch_buffer`` (no RTensor
                 # round-trip), so the fan-out is single-controller only.
                 if is_single_controller():
-                    self.actor.clear_batches(
-                        rollout_batch,
-                        adv_batch,
-                        {"teacher_logp": teacher_logp_refs},
-                    )
+                    self.actor.clear_batches(rollout_batch, adv_batch)
                     if self.critic is not None:
                         self.critic.clear_batches(rollout_batch, adv_batch)
                     if self.ref is not None:

@@ -717,10 +717,17 @@ class InferenceEngine(abc.ABC):
         """
         raise NotImplementedError()
 
-    def compute_logp(self, data: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def compute_logp(
+        self,
+        data: list[dict[str, Any]],
+        *,
+        align_to_prediction: bool = False,
+    ) -> list[torch.Tensor]:
         """Compute token log-probabilities for teacher distillation.
 
-        Implementations support this as an inference-side scoring API.
+        Implementations support this as an inference-side scoring API. Set
+        ``align_to_prediction`` when consumers expect next-token prediction
+        positions instead of response-token positions.
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement compute_logp()."
