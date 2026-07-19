@@ -101,11 +101,11 @@ For every valid response token, AReaL computes the sampled log-ratio
 `student_logp - teacher_logp`. It scales the base RL advantage by `rl_loss_weight`, then
 subtracts `opd_kl_coef` times that log-ratio. In other words, the adjusted advantage is
 `rl_loss_weight * base_advantage - opd_kl_coef * reverse_kl`. The penalty is applied
-before advantage normalization, matching slime's ordering. Critic returns are unchanged;
+before advantage normalization. Critic returns are unchanged;
 setting `rl_loss_weight` to zero enables pure OPD.
 
 `opd_student_logp_source` selects the student log-probabilities used by the penalty.
-`recompute` (the default, matching slime's default behavior) scores the rollout with the
+`recompute` (default) scores the rollout with the
 training actor. `rollout` reuses log-probabilities recorded by the inference engine and
 avoids an OPD-only actor forward pass. This setting does not change the PPO old-logp
 source controlled by `actor.recompute_logprob`.

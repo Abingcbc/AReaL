@@ -2,11 +2,14 @@
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 
 from areal.api.cli_args import (
+    GRPOConfig,
     InferenceEngineConfig,
     PPOActorConfig,
     TeacherConfig,
+    to_structured_cfg,
 )
 from areal.trainer.ppo.actor import PPOActor, grpo_loss_fn
 
@@ -24,9 +27,29 @@ def test_teacher_opd_defaults_preserve_joint_loss():
     assert config.opd_student_logp_source == "recompute"
 
 
+def test_teacher_opd_overrides_merge_into_structured_config():
+    """Teacher OPD overrides should remain compatible with OmegaConf structured configs."""
+    raw_config = OmegaConf.create(
+        {
+            "teacher": {
+                "engine_type": "rollout",
+                "rollout": {"backend": "vllm:d1p1t1"},
+                "distillation_mode": "kl_penalty",
+                "opd_kl_coef": 1.0,
+                "opd_student_logp_source": "recompute",
+            }
+        }
+    )
+
+    config = to_structured_cfg(raw_config, GRPOConfig)
+
+    assert config.teacher.distillation_mode == "kl_penalty"
+    assert config.teacher.opd_kl_coef == 1.0
+    assert config.teacher.opd_student_logp_source == "recompute"
+
+
 @pytest.mark.parametrize("source", ["recompute", "rollout"])
 def test_teacher_opd_accepts_student_logp_sources(source):
-    """OPD should accept both slime-compatible student logp sources."""
     config = _teacher_config(opd_student_logp_source=source)
 
     assert config.opd_student_logp_source == source
@@ -52,7 +75,6 @@ def test_teacher_rejects_unknown_distillation_mode():
 
 
 def test_actor_applies_opd_before_advantage_normalization_and_keeps_returns():
-    """Actor advantages should match slime ordering without changing critic returns."""
     actor = PPOActor(PPOActorConfig(), engine=None)
     normalized_input = None
 

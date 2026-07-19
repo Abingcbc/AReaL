@@ -8,7 +8,7 @@ from dataclasses import MISSING as dataclass_missing
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 import uvloop
 import yaml
@@ -3111,7 +3111,7 @@ class TeacherConfig:
         default=0.005,
         metadata={"help": "Distillation loss weight"},
     )
-    distillation_mode: Literal["joint_loss", "kl_penalty"] = field(
+    distillation_mode: str = field(
         default="joint_loss",
         metadata={
             "help": "Apply teacher supervision as a joint loss or OPD KL penalty.",
@@ -3122,7 +3122,7 @@ class TeacherConfig:
         default=1.0,
         metadata={"help": "Sampled reverse-KL coefficient for OPD KL penalty."},
     )
-    opd_student_logp_source: Literal["recompute", "rollout"] = field(
+    opd_student_logp_source: str = field(
         default="recompute",
         metadata={
             "help": "Student log-probability source for OPD KL penalty.",
