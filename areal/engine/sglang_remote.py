@@ -554,8 +554,15 @@ class RemoteSGLangEngine(InferenceEngine):
             dynamic_bs=dynamic_bs,
         )
 
-    def compute_logp(self, data: list[dict[str, Any]]) -> list[torch.Tensor]:
-        return self._engine.compute_logp(data)
+    def compute_logp(
+        self,
+        data: list[dict[str, Any]],
+        *,
+        align_to_prediction: bool = False,
+    ) -> list[torch.Tensor]:
+        return self._engine.compute_logp(
+            data, align_to_prediction=align_to_prediction
+        )
 
     def pause(self):
         return self._engine.pause()

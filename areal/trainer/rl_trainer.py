@@ -8,6 +8,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, cast
 
+import torch
 import torch.distributed as dist
 from torchdata.stateful_dataloader import StatefulDataLoader
 
@@ -73,6 +74,21 @@ if TYPE_CHECKING:
     from areal.trainer.ppo.critic import PPOCriticController
 
 logger = logging.getLogger("RLTrainer")
+
+
+def _store_actor_logps(
+    rollout_batch: list[dict[str, Any]],
+    actor_logps: list[torch.Tensor],
+    *,
+    store_prox_logp: bool,
+    store_opd_student_logp: bool,
+) -> None:
+    """Store actor scores only under the semantics that requested them."""
+    for traj, logp in zip(rollout_batch, actor_logps):
+        if store_prox_logp:
+            traj["prox_logp"] = logp
+        if store_opd_student_logp:
+            traj["opd_student_logp"] = logp
 
 
 class _EmptyDataLoader:
@@ -677,19 +693,39 @@ class PPOTrainer:
                         args={"global_step": global_step},
                     ),
                 ):
-                    teacher_logps = self.teacher.compute_logp(rollout_batch)
+                    if self.config.teacher.engine_type == "rollout":
+                        teacher_logps = self.teacher.compute_logp(
+                            rollout_batch, align_to_prediction=True
+                        )
+                    else:
+                        teacher_logps = self.teacher.compute_logp(rollout_batch)
+                    distillation_mode = self.config.teacher.distillation_mode
                     for traj, logp in zip(rollout_batch, teacher_logps):
                         traj["teacher_logp"] = logp
                         traj["rl_loss_weight"] = self.config.teacher.rl_loss_weight
                         traj["distill_loss_weight"] = (
                             self.config.teacher.distill_loss_weight
                         )
+                        traj["opd_mode"] = distillation_mode
+                        traj["opd_kl_coef"] = self.config.teacher.opd_kl_coef
+                        traj["opd_student_logp_source"] = (
+                            self.config.teacher.opd_student_logp_source
+                        )
                 if self._should_offload_teacher:
                     self._offload_model(self.teacher, role="teacher")
 
             if self._should_offload_actor:
                 self._onload_model(self.actor, role="actor")
-            if config.actor.should_compute_prox_logp():
+            use_opd_kl_penalty = (
+                config.teacher is not None
+                and config.teacher.distillation_mode == "kl_penalty"
+            )
+            recompute_opd_student_logp = (
+                use_opd_kl_penalty
+                and config.teacher.opd_student_logp_source == "recompute"
+            )
+            compute_prox_logp = config.actor.should_compute_prox_logp()
+            if compute_prox_logp or recompute_opd_student_logp:
                 with (
                     stats_tracker.record_timing("recompute_logp"),
                     perf_tracer.trace_scope(
@@ -699,8 +735,12 @@ class PPOTrainer:
                     ),
                 ):
                     prox_logps = self.actor.compute_logp(rollout_batch)
-                    for traj, logp in zip(rollout_batch, prox_logps):
-                        traj["prox_logp"] = logp
+                    _store_actor_logps(
+                        rollout_batch,
+                        prox_logps,
+                        store_prox_logp=compute_prox_logp,
+                        store_opd_student_logp=recompute_opd_student_logp,
+                    )
                     self.actor.get_device_stats().log("recompute logp")
 
             with (

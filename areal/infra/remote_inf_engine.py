@@ -337,6 +337,15 @@ class RemoteInfBackendProtocol(Protocol):
         ...
 
 
+def _align_logprobs_to_prediction_positions(logprobs: torch.Tensor) -> torch.Tensor:
+    """Shift response-token scores to next-token prediction positions."""
+    if logprobs.shape[-1] == 0:
+        return logprobs
+    aligned = torch.roll(logprobs, shifts=-1, dims=-1)
+    aligned[..., -1] = 0
+    return aligned
+
+
 class RemoteInfEngine(InferenceEngine):
     """
     Base implementation for HTTP-based remote inference engines.
@@ -515,7 +524,12 @@ class RemoteInfEngine(InferenceEngine):
         with self.lock:
             return self._version
 
-    def compute_logp(self, data: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def compute_logp(
+        self,
+        data: list[dict[str, Any]],
+        *,
+        align_to_prediction: bool = False,
+    ) -> list[torch.Tensor]:
         results: list[torch.Tensor] = []
         timeout = self.config.request_timeout
         version = self.get_version()
@@ -561,6 +575,8 @@ class RemoteInfEngine(InferenceEngine):
                 out[i, write_idx] = torch.tensor(
                     token_logps, device=out.device, dtype=out.dtype
                 )
+            if align_to_prediction:
+                out = _align_logprobs_to_prediction_positions(out)
             results.append(out)
         return results
 

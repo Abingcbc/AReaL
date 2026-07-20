@@ -449,6 +449,37 @@ def compute_binary_kl_divergence(
     return p * torch.log(p / q) + (1 - p) * torch.log((1 - p) / (1 - q))
 
 
+def apply_opd_advantage_penalty(
+    advantages: torch.Tensor,
+    student_logprobs: torch.Tensor,
+    teacher_logprobs: torch.Tensor,
+    loss_mask: torch.Tensor,
+    kl_coef: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply a sampled reverse-KL log-ratio penalty to token advantages."""
+    expected_shape = advantages.shape
+    for name, tensor in (
+        ("student_logprobs", student_logprobs),
+        ("teacher_logprobs", teacher_logprobs),
+        ("loss_mask", loss_mask),
+    ):
+        if tensor.shape != expected_shape:
+            raise ValueError(
+                f"{name} shape {tensor.shape} must match advantages shape "
+                f"{expected_shape}."
+            )
+    if kl_coef < 0:
+        raise ValueError(f"kl_coef must be non-negative, got {kl_coef}.")
+
+    mask = loss_mask.bool()
+    reverse_kl = (
+        student_logprobs.detach().float() - teacher_logprobs.detach().float()
+    )
+    reverse_kl = torch.where(mask, reverse_kl, 0.0)
+    adjusted_advantages = advantages.float() - kl_coef * reverse_kl
+    return adjusted_advantages, reverse_kl
+
+
 def ppo_actor_loss_fn(
     logprobs: torch.Tensor,
     proximal_logprobs: torch.Tensor,

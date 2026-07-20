@@ -80,6 +80,41 @@ J_{RKL}(\theta)$.
   $\pi_\theta$. In the code, this is implemented as:
   `loss = rl_loss_weight * loss + distill_loss_weight * rkl_penalty`
 
+### KL Penalty OPD
+
+AReaL can also inject teacher guidance into the policy-gradient advantages instead of
+adding an auxiliary actor loss. Enable this behavior explicitly:
+
+```yaml
+teacher:
+  engine_type: rollout
+  path: Qwen/Qwen2.5-14B-Instruct
+  rollout:
+    backend: "vllm:d1p1t2"
+  distillation_mode: kl_penalty
+  opd_kl_coef: 1.0
+  opd_student_logp_source: recompute
+  rl_loss_weight: 1.0
+```
+
+For every valid response token, AReaL computes the sampled log-ratio
+`student_logp - teacher_logp`. It scales the base RL advantage by `rl_loss_weight`, then
+subtracts `opd_kl_coef` times that log-ratio. In other words, the adjusted advantage is
+`rl_loss_weight * base_advantage - opd_kl_coef * reverse_kl`. The penalty is applied
+before advantage normalization. Critic returns are unchanged;
+setting `rl_loss_weight` to zero enables pure OPD.
+
+`opd_student_logp_source` selects the student log-probabilities used by the penalty.
+`recompute` (default) scores the rollout with the
+training actor. `rollout` reuses log-probabilities recorded by the inference engine and
+avoids an OPD-only actor forward pass. This setting does not change the PPO old-logp
+source controlled by `actor.recompute_logprob`.
+
+This mode is mutually exclusive with the joint distillation loss, so
+`distill_loss_weight` is not used. PPO, SAPO, and CISPO retain token-level adjusted
+advantages. With sequence-level importance sampling (GSPO), the existing actor loss
+averages the adjusted advantages within each sequence.
+
 ## Running the example
 
 Need to add teacher configuration to your yaml.
@@ -92,7 +127,6 @@ Teacher supports two modes via `teacher.engine_type`:
   compatibility.
 
 ### Mode 1: rollout teacher (recommended)
-
 
 ```yaml
 teacher:

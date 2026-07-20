@@ -2,6 +2,7 @@
 
 from areal.utils.functional.functional import (
     RejectionSamplingResult,
+    apply_opd_advantage_penalty,
     apply_rejection_sampling,
     cispo_loss_fn,
     dpo_pair_logratios,
@@ -20,6 +21,7 @@ from areal.utils.functional.vocab_parallel import (
 __all__ = [
     # functional.py
     "RejectionSamplingResult",
+    "apply_opd_advantage_penalty",
     "apply_rejection_sampling",
     "cispo_loss_fn",
     "dpo_pair_logratios",
